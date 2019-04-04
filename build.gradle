@@ -1,0 +1,182 @@
+plugins {
+  id 'java-library'
+  id 'eclipse'
+  id 'maven'
+  id 'maven-publish'
+  id 'jacoco'
+
+  id 'com.github.ben-manes.versions' version '0.21.0'
+  id 'com.jfrog.artifactory' version '4.9.3'
+  id 'org.owasp.dependencycheck' version '5.0.0-M2'
+  id 'org.sonarqube' version '2.7'
+}
+
+ext {
+  jaxwsRtVersion           = '2.3.0'
+  jaegertracingVersion     = '0.34.0'
+  junitVersion             = '5.4.1'
+  micrometerVersion        = '1.1.3'
+  opentracingVersion       = '0.3.2'
+  log4jVersion             = '2.11.2'
+  lombokVersion            = '1.18.6'
+  springBootVersion        = '2.1.3.RELEASE'
+  apacheHttpClientVersion  = '4.5.7'
+  amazonAWSJavaSDKVersion  = '1.11.525'
+  commonsIOVersion         = '2.6'
+  awaitilityVersion        = '3.1.6'
+  mockitoJupiterVersion    = '2.25.1'
+}
+
+version '0.1.16'
+
+check.dependsOn dependencyCheckAnalyze
+
+dependencyCheck {
+  suppressionFile "${projectDir}/dependencyCheckSuppression.xml"
+}
+
+sonarqube {
+  properties {
+    property 'sonar.projectName', 'platform.libraries.java'
+    property 'sonar.projectKey', 'org.sonarqube:platform.libraries.java'
+    property 'sonar.host.url','http://sonarqube73.eis-platformlive.cloud'
+    property 'sonar.test.inclusions', '/src/test/java/**,/src/integration/java/**'
+    property 'sonar.exclusions', 'src/main/java/com/ebsco/platform/shared/metrics/filter/**'
+    property 'sonar.test.exclusions', 'build/generated-test-sources/**'
+  }
+}
+
+jacoco {
+  toolVersion = '0.8.2'
+}
+
+jacocoTestReport {
+  dependsOn test
+  afterEvaluate {
+    classDirectories = files(classDirectories.files.collect {
+      fileTree(dir: it, exclude: ['**/config/**', '**/annotations/**'])
+    })
+  }
+}
+
+configurations.all {
+  exclude group: 'org.springframework.boot', module: 'spring-boot-starter-logging'
+  exclude group: 'ch.qos.logback', module: 'logback-classic'
+}
+
+dependencies {
+  api "org.springframework.boot:spring-boot-starter-actuator:${springBootVersion}"
+  api "org.springframework.boot:spring-boot-starter-aop:${springBootVersion}"
+  api "org.springframework.boot:spring-boot-starter-web:${springBootVersion}"
+  api "org.springframework.boot:spring-boot-starter-log4j2:${springBootVersion}"
+  api "org.springframework.boot:spring-boot-starter-hateoas:${springBootVersion}"
+  annotationProcessor "org.apache.logging.log4j:log4j-core:${log4jVersion}"
+
+  api "io.micrometer:micrometer-core:${micrometerVersion}"
+  api "io.micrometer:micrometer-registry-prometheus:${micrometerVersion}"
+
+  api "io.opentracing.contrib:opentracing-spring-web-autoconfigure:${opentracingVersion}"
+  api "io.jaegertracing:jaeger-core:${jaegertracingVersion}"
+  api "io.jaegertracing:jaeger-thrift:${jaegertracingVersion}"
+
+  api "org.apache.httpcomponents:httpclient:${apacheHttpClientVersion}"
+
+  api platform("com.amazonaws:aws-java-sdk-bom:${amazonAWSJavaSDKVersion}")
+  api "com.amazonaws:aws-java-sdk-core"
+  api "commons-io:commons-io:${commonsIOVersion}"
+
+  // Soap support
+  api "com.sun.xml.ws:jaxws-rt:${jaxwsRtVersion}"
+
+  // Lombok
+  compileOnly "org.projectlombok:lombok:${lombokVersion}"
+  testCompileOnly "org.projectlombok:lombok:${lombokVersion}"
+  annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+  testAnnotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+
+  // JUnit
+  testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+  testRuntimeOnly "org.junit.vintage:junit-vintage-engine:${junitVersion}"
+  testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
+  testImplementation "org.junit.jupiter:junit-jupiter-params:${junitVersion}"
+
+  // Spring test
+  testImplementation "org.springframework.boot:spring-boot-starter-test:${springBootVersion}"
+
+  // Other test dependencies
+  testImplementation "org.mockito:mockito-junit-jupiter:${mockitoJupiterVersion}"
+  testImplementation "org.awaitility:awaitility:${awaitilityVersion}"
+  testImplementation "io.github.netmikey.logunit:logunit-core:1.1.0"
+  testRuntimeOnly "io.github.netmikey.logunit:logunit-log4j2:1.1.0"
+}
+
+repositories {
+  mavenLocal()
+  maven {
+    url 'https://eis.jfrog.io/eis/libs-release-local'
+    credentials {
+      username = artifactory_user
+      password = artifactory_password
+    }
+  }
+  maven {
+    url 'https://eis.jfrog.io/eis/libs-release'
+    credentials {
+      username = artifactory_user
+      password = artifactory_password
+    }
+  }
+}
+
+task sourceJar(type: Jar) {
+  classifier 'sources'
+  from sourceSets.main.allJava
+}
+
+tasks.withType(JavaCompile) {
+  options.encoding = 'UTF-8'
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+  classifier 'javadoc'
+  from javadoc.destinationDir
+}
+javadoc.options.addStringOption('Xdoclint:none', '-quiet')
+
+test {
+    useJUnitPlatform()
+}
+
+artifactory {
+  contextUrl = project.artifactory_contextUrl
+  resolve {
+    repository {
+      repoKey = 'libs-release'
+      username = artifactory_user
+      password = artifactory_password
+    }
+  }
+  publish {
+    repository {
+      repoKey = 'libs-release-local'
+      username = artifactory_user
+      password = artifactory_password
+      maven = true
+    }
+
+    defaults { publications('mavenJava') }
+  }
+}
+
+publishing {
+  publications {
+    mavenJava(MavenPublication) {
+      groupId 'com.ebsco'
+      artifactId 'platform.libraries.java'
+
+      from components.java
+      artifact sourceJar
+      artifact javadocJar
+    }
+  }
+}
